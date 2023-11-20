@@ -441,6 +441,24 @@ Clone this repository.
   git clone https://github.com/EVerest/libocpp
 ```
 
+Clone the EVerest CMake project at the same folder level you cloned libocpp.
+
+```bash
+  git clone https://github.com/EVerest/everest-cmake.git
+```
+
+Install the [EVerest Dev Environment](https://github.com/folkengine/everest-dev-environment/),
+and make sure it's in your path. Instructions are here: https://everest.github.io/nightly/dev_tools/edm.html#edm
+
+```bash
+❯ python3 -m pip install --upgrade pip setuptools wheel jstyleson jsonschema
+❯ git clone git@github.com:EVerest/everest-dev-environment.git
+❯ cd everest-dev-environment/dependency_manager
+❯ python3 -m pip install .
+❯ edm
+[edm]: No --config, --cmake or --create-config parameter given, exiting.
+```
+
 In the libocpp folder create a folder named build and cd into it.
 Execute cmake and then make install:
 
