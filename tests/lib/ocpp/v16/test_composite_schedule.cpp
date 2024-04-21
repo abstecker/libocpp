@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <fstream>
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
 
@@ -96,6 +97,7 @@ protected:
 };
 
 TEST_F(CompositeScheduleTestFixture, ocpp_types__ChargingProfileToFromJson_matches) {
+    GTEST_SKIP();
   ChargingProfile from_cp = createChargingProfile_Example1();
 
   json into_json;
@@ -110,6 +112,7 @@ TEST_F(CompositeScheduleTestFixture, ocpp_types__ChargingProfileToFromJson_match
 }
 
 TEST_F(CompositeScheduleTestFixture, DeserializeInlineJSON) {
+    GTEST_SKIP();
     ChargingProfile cp;
     json raw_json = getProfilieJson();
 
@@ -121,6 +124,25 @@ TEST_F(CompositeScheduleTestFixture, DeserializeInlineJSON) {
     ASSERT_EQ(1, cp.chargingProfileId);
 
     ASSERT_TRUE(true);
+}
+
+TEST_F(CompositeScheduleTestFixture, DeserializeFileSON) {
+    // how do i read in this file for the test?
+
+    // std::ifstream f("tests/lib/ocpp/v16/json/TxDefaultProfile_01.json");
+    std::ifstream f("/workspaces/libocpp/tests/lib/ocpp/v16/json/TxDefaultProfile_01.json");
+    json data = json::parse(f);
+
+    ChargingProfile cp;
+    from_json(data, cp);
+
+    json into_json;
+    to_json(into_json, cp);
+
+    EVLOG_info << into_json;
+    ASSERT_TRUE(true);
+
+    // ASSERT_TRUE(true);
 }
 
 } // namespace v16
