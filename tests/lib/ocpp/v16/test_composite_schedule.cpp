@@ -130,7 +130,10 @@ TEST_F(CompositeScheduleTestFixture, DeserializeFileSON) {
     // how do i read in this file for the test?
 
     // std::ifstream f("tests/lib/ocpp/v16/json/TxDefaultProfile_01.json");
-    std::ifstream f("/workspaces/libocpp/tests/lib/ocpp/v16/json/TxDefaultProfile_01.json");
+    // std::ifstream f("/workspaces/libocpp/tests/lib/ocpp/v16/json/TxDefaultProfile_01.json");
+    std::ifstream f("/tmp/EVerest/libocpp/json/TxDefaultProfile_01.json");
+
+    
     json data = json::parse(f);
 
     ChargingProfile cp;
