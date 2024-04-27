@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+nukeit
+dobuild
+dotest
+
