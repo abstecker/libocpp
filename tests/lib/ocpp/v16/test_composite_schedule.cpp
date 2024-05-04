@@ -1,151 +1,195 @@
-#include <gtest/gtest.h>
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2020 - 2024 Pionix GmbH and Contributors to EVerest
+
+#include <filesystem>
 #include <fstream>
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+#include <memory>
 #include <nlohmann/json.hpp>
-using json = nlohmann::json;
+#include <vector>
+namespace fs = std::filesystem;
 
 #include "everest/logging.hpp"
-#include <ocpp/v16/ocpp_types.hpp>
+#include <database_handler_mock.hpp>
+#include <evse_security_mock.hpp>
+#include <ocpp/common/call_types.hpp>
+#include <ocpp/common/evse_security_impl.hpp>
+#include <ocpp/v16/charge_point_impl.hpp>
+#include <ocpp/v16/enums.hpp>
+#include <ocpp/v16/smart_charging.hpp>
+#include <optional>
 
 namespace ocpp {
 namespace v16 {
 
+/**
+ * CompositeSchedule Test Fixture
+ */
 class CompositeScheduleTestFixture : public testing::Test {
 protected:
     void SetUp() override {
+        this->evse_security = std::make_shared<EvseSecurityMock>();
     }
 
-    /**
-     * TxDefaultProfile, stack #1: time-of-day limitation to 2 kW, recurring every day from 17:00h to 20:00h.
-     *
-     * This profile is Example #1 taken from the OCPP 2.0.1 Spec Part 2, page 241.
-     */
-    ChargingProfile createChargingProfile_Example1() {
-        auto chargingRateUnit = ChargingRateUnit::W;
-        auto chargingSchedulePeriod = std::vector<ChargingSchedulePeriod>{ChargingSchedulePeriod{0, 2000, 1}};
-        auto duration = 1080;
-        auto startSchedule = ocpp::DateTime("2024-01-17T17:00:00");
-        float minChargingRate = 0;
-        auto chargingSchedule =
-            ChargingSchedule{chargingRateUnit, chargingSchedulePeriod, duration, startSchedule, minChargingRate};
+    void addConnector(int id) {
+        auto connector = Connector{id};
 
-        auto chargingProfileId = 1;
-        auto stackLevel = 1;
-        auto chargingProfilePurpose = ChargingProfilePurposeType::TxDefaultProfile;
-        auto chargingProfileKind = ChargingProfileKindType::Absolute;
-        auto recurrencyKind = RecurrencyKindType::Daily;
-        return ChargingProfile{chargingProfileId,
-                               stackLevel,
-                               chargingProfilePurpose,
-                               chargingProfileKind,
-                               chargingSchedule,
-                               {}, // transactionId
-                               recurrencyKind,
-                               ocpp::DateTime("2024-01-01T00:00:00"),
-                               ocpp::DateTime("2024-03-19T00:00:00")};
+        auto timer = std::unique_ptr<Everest::SteadyTimer>();
+
+        connector.transaction =
+            std::make_shared<Transaction>(-1, id, "test", "test", 1, std::nullopt, ocpp::DateTime(), std::move(timer));
+        connectors[id] = std::make_shared<Connector>(connector);
     }
 
-    ChargingProfile createChargingProfile_Example2() {
-        auto chargingRateUnit = ChargingRateUnit::W;
-        auto chargingSchedulePeriod = std::vector<ChargingSchedulePeriod>{ChargingSchedulePeriod{0, 999999, 1}};
-        auto duration = 0;
-        auto startSchedule = ocpp::DateTime("2020-01-19T00:00:00");
-        float minChargingRate = 0;
-        auto chargingSchedule =
-            ChargingSchedule{chargingRateUnit, chargingSchedulePeriod, duration, startSchedule, minChargingRate};
-
-        auto chargingProfileId = 11;
-        auto stackLevel = 2;
-        auto chargingProfilePurpose = ChargingProfilePurposeType::TxDefaultProfile;
-        auto chargingProfileKind = ChargingProfileKindType::Recurring;
-        auto recurrencyKind = RecurrencyKindType::Weekly;
-        return ChargingProfile{chargingProfileId,
-                               stackLevel,
-                               chargingProfilePurpose,
-                               chargingProfileKind,
-                               chargingSchedule,
-                               {}, // transactionId
-                               recurrencyKind,
-                               ocpp::DateTime("2024-01-01T00:00:00"),
-                               ocpp::DateTime("2024-03-19T00:00:00")};
-    }
-
-    json getProfilieJson() {
-        return json::parse(R"(
-        {
-            "chargingProfileId": 1,
-            "chargingProfileKind": "Absolute",
-            "chargingProfilePurpose": "TxDefaultProfile",
-            "chargingSchedule": {
-                "chargingRateUnit": "W",
-                "chargingSchedulePeriod": [
-                    {
-                        "limit": 2000.0,
-                        "numberPhases": 1,
-                        "startPeriod": 0
-                    }
-                ],
-                "duration": 1080,
-                "minChargingRate": 0.0,
-                "startSchedule": "2024-01-17T17:00:00.000Z"
-            },
-            "recurrencyKind": "Daily",
-            "stackLevel": 1
+    SmartChargingHandler* createSmartChargingHandler(const int number_of_connectors) {
+        for (int i = 0; i <= number_of_connectors; i++) {
+            addConnector(i);
         }
-        )");
-        // return ex1;
+
+        const std::string chargepoint_id = "1";
+        const fs::path database_path = "na";
+        const fs::path init_script_path = "na";
+
+        auto database = std::make_unique<common::DatabaseConnection>(database_path / (chargepoint_id + ".db"));
+        std::shared_ptr<DatabaseHandlerMock> database_handler =
+            std::make_shared<DatabaseHandlerMock>(std::move(database), init_script_path);
+
+        auto handler = new SmartChargingHandler(connectors, database_handler, true);
+
+        return handler;
     }
+
+    ChargingProfile getChargingProfileFromFile(const std::string& filename) {
+        const std::string base_path = "/tmp/EVerest/libocpp/json/";
+        const std::string full_path = base_path + filename;
+
+        std::ifstream f(full_path.c_str());
+        json data = json::parse(f);
+
+        ChargingProfile cp;
+        from_json(data, cp);
+        return cp;
+    }
+
+    void log_duration(int32_t duration) {
+        int32_t remaining = duration;
+
+        std::string log_str = "    Duration> ";
+
+        if (remaining >= 86400) {
+            int32_t days = remaining / 86400;
+            remaining = remaining % 86400;
+            if (days > 1) {
+                log_str += std::to_string(days) + " Days ";
+            } else {
+                log_str += std::to_string(days) + " Day ";
+            }
+        }
+        if (remaining >= 3600) {
+            int32_t hours = remaining / 3600;
+            remaining = remaining % 3600;
+            log_str += std::to_string(hours) + " Hours ";
+        }
+        if (remaining >= 60) {
+            int32_t minutes = remaining / 60;
+            remaining = remaining % 60;
+            log_str += std::to_string(minutes) + " Minutes ";
+        }
+        if (remaining > 0) {
+            log_str += std::to_string(remaining) + " Seconds ";
+        }
+        EVLOG_info << log_str;
+    }
+
+    void log_me(ChargingProfile& cp) {
+        json cp_json;
+        to_json(cp_json, cp);
+
+        EVLOG_info << "  ChargingProfile> " << cp_json.dump(4);
+        log_duration(cp.chargingSchedule.duration.value_or(0));
+    }
+
+    void log_me(std::vector<ChargingProfile> profiles) {
+        EVLOG_info << "[";
+        for (auto& profile : profiles) {
+            log_me(profile);
+        }
+        EVLOG_info << "]";
+    }
+
+    void log_me(EnhancedChargingSchedule& ecs) {
+        json ecs_json;
+        to_json(ecs_json, ecs);
+
+        EVLOG_info << "EnhancedChargingSchedule> " << ecs_json.dump(4);
+    }
+
+    /// \brief Returns a vector of ChargingProfiles to be used as a baseline for testing core functionality
+    /// of generating an EnhancedChargingSchedule.
+    std::vector<ChargingProfile> getBaselineProfileVector() {
+        auto profile_01 = getChargingProfileFromFile("TxDefaultProfile_01.json");
+        auto profile_100 = getChargingProfileFromFile("TxDefaultProfile_100.json");
+        return {profile_01, profile_100};
+    }
+
+    // Default values used within the tests
+    std::map<int32_t, std::shared_ptr<Connector>> connectors;
+    std::shared_ptr<DatabaseHandler> database_handler;
+    std::shared_ptr<EvseSecurityMock> evse_security;
 };
 
-TEST_F(CompositeScheduleTestFixture, ocpp_types__ChargingProfileToFromJson_matches) {
-    GTEST_SKIP();
-  ChargingProfile from_cp = createChargingProfile_Example1();
+TEST_F(CompositeScheduleTestFixture, CalculateEnhancedCompositeSchedule_ValidatedBaseline) {
+    auto handler = createSmartChargingHandler(1);
 
-  json into_json;
-  to_json(into_json, from_cp);
-  ChargingProfile to_cp;
-  from_json(into_json, to_cp);
+    std::vector<ChargingProfile> profiles = getBaselineProfileVector();
+    log_me(profiles);
 
-  ASSERT_EQ(from_cp.chargingProfileId, to_cp.chargingProfileId);
+    const DateTime my_date_start_range = ocpp::DateTime("2024-01-17T18:01:00");
+    const DateTime my_date_end_range = ocpp::DateTime("2024-01-18T00:00:00");
 
-  EVLOG_info << into_json;
-  ASSERT_TRUE(true);
+    EVLOG_info << "    Start> " << my_date_start_range.to_rfc3339();
+    EVLOG_info << "      End> " << my_date_end_range.to_rfc3339();
+
+    auto composite_schedule = handler->calculate_enhanced_composite_schedule(
+        profiles, my_date_start_range, my_date_end_range, 1, profiles.at(0).chargingSchedule.chargingRateUnit);
+
+    log_me(composite_schedule);
+    ASSERT_EQ(composite_schedule.chargingRateUnit, ChargingRateUnit::W);
+    ASSERT_EQ(composite_schedule.duration, 21540);
+    ASSERT_EQ(profiles.size(), 2);
+    ASSERT_EQ(composite_schedule.chargingSchedulePeriod.size(), 2);
+    auto& period_01 = composite_schedule.chargingSchedulePeriod.at(0);
+    ASSERT_EQ(period_01.limit, 2000);
+    ASSERT_EQ(period_01.numberPhases, 1);
+    ASSERT_EQ(period_01.stackLevel, 1);
+    ASSERT_EQ(period_01.startPeriod, 0);
+    auto& period_02 = composite_schedule.chargingSchedulePeriod.at(1);
+    ASSERT_EQ(period_02.limit, 11000);
+    ASSERT_EQ(period_02.numberPhases, 3);
+    ASSERT_EQ(period_02.stackLevel, 0);
+    ASSERT_EQ(period_02.startPeriod, 1020);
 }
 
-TEST_F(CompositeScheduleTestFixture, DeserializeInlineJSON) {
+TEST_F(CompositeScheduleTestFixture, CalculateEnhancedCompositeSchedule_TxProfile) {
     GTEST_SKIP();
-    ChargingProfile cp;
-    json raw_json = getProfilieJson();
+    auto handler = createSmartChargingHandler(1);
 
-    json into_json;
-    to_json(into_json, createChargingProfile_Example2());
+    ChargingProfile profile_01 = getChargingProfileFromFile("TxDefaultProfile_01.json");
+    ChargingProfile txprofile_02 = getChargingProfileFromFile("TxProfile_02.json");
+    ChargingProfile profile_100 = getChargingProfileFromFile("TxDefaultProfile_100.json");
 
-    from_json(getProfilieJson(), cp);
+    std::vector<ChargingProfile> profiles = {profile_01, txprofile_02, profile_100};
+    log_me(profiles);
 
-    ASSERT_EQ(1, cp.chargingProfileId);
+    const DateTime my_date_start_range = ocpp::DateTime("2024-01-17T18:01:00");
+    const DateTime my_date_end_range = ocpp::DateTime("2024-01-18T00:00:00");
 
-    ASSERT_TRUE(true);
-}
+    EVLOG_info << "    Start> " << my_date_start_range.to_rfc3339();
+    EVLOG_info << "      End> " << my_date_end_range.to_rfc3339();
 
-TEST_F(CompositeScheduleTestFixture, DeserializeFileSON) {
-    // how do i read in this file for the test?
-
-    // std::ifstream f("tests/lib/ocpp/v16/json/TxDefaultProfile_01.json");
-    // std::ifstream f("/workspaces/libocpp/tests/lib/ocpp/v16/json/TxDefaultProfile_01.json");
-    std::ifstream f("/tmp/EVerest/libocpp/json/TxDefaultProfile_01.json");
-
-    
-    json data = json::parse(f);
-
-    ChargingProfile cp;
-    from_json(data, cp);
-
-    json into_json;
-    to_json(into_json, cp);
-
-    EVLOG_info << into_json;
-    ASSERT_TRUE(true);
-
-    // ASSERT_TRUE(true);
+    auto composite_schedule = handler->calculate_enhanced_composite_schedule(
+        profiles, my_date_start_range, my_date_end_range, 1, profiles.at(0).chargingSchedule.chargingRateUnit);
 }
 
 } // namespace v16
