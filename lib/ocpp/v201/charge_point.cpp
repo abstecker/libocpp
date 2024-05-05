@@ -143,10 +143,10 @@ ChargePoint::ChargePoint(const std::map<int32_t, int32_t>& evse_connector_struct
             if (!filtered_meter_value.sampledValue.empty()) {
                 const auto trigger = type == ReadingContextEnum::Sample_Clock ? TriggerReasonEnum::MeterValueClock
                                                                               : TriggerReasonEnum::MeterValuePeriodic;
-                this->transaction_event_req(
-                    TransactionEventEnum::Updated, DateTime(), transaction, trigger, seq_no, std::nullopt,
-                    this->evses.at(static_cast<int32_t>(evse_id_))->get_evse_info(), std::nullopt,
-                    std::vector<MeterValue>(1, filtered_meter_value), std::nullopt, this->is_offline(), reservation_id);
+                this->transaction_event_req(TransactionEventEnum::Updated, DateTime(), transaction, trigger, seq_no,
+                                            std::nullopt, std::nullopt, std::nullopt,
+                                            std::vector<MeterValue>(1, filtered_meter_value), std::nullopt,
+                                            this->is_offline(), reservation_id);
             }
         };
 
@@ -199,7 +199,7 @@ void ChargePoint::stop() {
     this->websocket_timer.stop();
     this->client_certificate_expiration_check_timer.stop();
     this->v2g_certificate_expiration_check_timer.stop();
-    this->disconnect_websocket(websocketpp::close::status::normal);
+    this->disconnect_websocket(WebsocketCloseReason::Normal);
     this->message_queue->stop();
 }
 
@@ -211,7 +211,7 @@ void ChargePoint::connect_websocket() {
     }
 }
 
-void ChargePoint::disconnect_websocket(websocketpp::close::status::value code) {
+void ChargePoint::disconnect_websocket(WebsocketCloseReason code) {
     if (this->websocket != nullptr) {
         this->disable_automatic_websocket_reconnects = true;
         this->websocket->disconnect(code);
@@ -374,9 +374,13 @@ void ChargePoint::on_transaction_finished(const int32_t evse_id, const DateTime&
 
     const auto trigger_reason = utils::stop_reason_to_trigger_reason_enum(reason);
 
+    // E07.FR.02 The field idToken is provided when the authorization of the transaction has been ended
+    const std::optional<IdToken> transaction_id_token =
+        trigger_reason == ocpp::v201::TriggerReasonEnum::StopAuthorized ? id_token : std::nullopt;
+
     this->transaction_event_req(TransactionEventEnum::Ended, timestamp, transaction, trigger_reason, seq_no,
-                                std::nullopt, this->evses.at(static_cast<int32_t>(evse_id))->get_evse_info(), id_token,
-                                meter_values, std::nullopt, this->is_offline(), std::nullopt);
+                                std::nullopt, std::nullopt, transaction_id_token, meter_values, std::nullopt,
+                                this->is_offline(), std::nullopt);
 
     this->database_handler->transaction_metervalues_clear(transaction_id);
 
@@ -555,8 +559,7 @@ bool ChargePoint::on_charging_state_changed(const uint32_t evse_id, const Chargi
             } else {
                 transaction->chargingState = charging_state;
                 this->transaction_event_req(TransactionEventEnum::Updated, DateTime(), transaction->get_transaction(),
-                                            trigger_reason, transaction->get_seq_no(), std::nullopt,
-                                            this->evses.at(static_cast<int32_t>(evse_id))->get_evse_info(),
+                                            trigger_reason, transaction->get_seq_no(), std::nullopt, std::nullopt,
                                             std::nullopt, std::nullopt, std::nullopt, this->is_offline(), std::nullopt);
             }
             return true;
@@ -903,7 +906,7 @@ void ChargePoint::init_websocket() {
     });
 
     this->websocket->register_closed_callback(
-        [this, connection_options, configuration_slot](const websocketpp::close::status::value reason) {
+        [this, connection_options, configuration_slot](const WebsocketCloseReason reason) {
             EVLOG_warning << "Closed websocket of NetworkConfigurationPriority: "
                           << this->network_configuration_priority + 1
                           << " which is configurationSlot: " << configuration_slot;
@@ -911,7 +914,7 @@ void ChargePoint::init_websocket() {
             if (!this->disable_automatic_websocket_reconnects) {
                 this->websocket_timer.timeout(
                     [this, reason]() {
-                        if (reason != websocketpp::close::status::service_restart) {
+                        if (reason != WebsocketCloseReason::ServiceRestart) {
                             this->next_network_configuration_priority();
                         }
                         this->start_websocket();
@@ -1530,7 +1533,7 @@ void ChargePoint::handle_variable_changed(const SetVariableData& set_variable_da
         if (this->device_model->get_value<int>(ControllerComponentVariables::SecurityProfile) < 3) {
             // TODO: A01.FR.11 log the change of BasicAuth in Security Log
             this->websocket->set_authorization_key(set_variable_data.attributeValue.get());
-            this->websocket->disconnect(websocketpp::close::status::service_restart);
+            this->websocket->disconnect(WebsocketCloseReason::ServiceRestart);
         }
     }
     if (component_variable == ControllerComponentVariables::HeartbeatInterval and
@@ -2039,7 +2042,7 @@ void ChargePoint::handle_certificate_signed_req(Call<CertificateSignedRequest> c
     if (response.status == CertificateSignedStatusEnum::Accepted and
         cert_signing_use == ocpp::CertificateSigningUseEnum::ChargingStationCertificate and
         this->device_model->get_value<int>(ControllerComponentVariables::SecurityProfile) == 3) {
-        this->websocket->disconnect(websocketpp::close::status::service_restart);
+        this->websocket->disconnect(WebsocketCloseReason::ServiceRestart);
     }
 }
 
@@ -2710,8 +2713,8 @@ void ChargePoint::handle_trigger_message(Call<TriggerMessageRequest> call) {
 
             this->transaction_event_req(TransactionEventEnum::Updated, DateTime(),
                                         enhanced_transaction->get_transaction(), TriggerReasonEnum::Trigger,
-                                        enhanced_transaction->get_seq_no(), std::nullopt, evse.get_evse_info(),
-                                        std::nullopt, opt_meter_value, std::nullopt, this->is_offline(), std::nullopt);
+                                        enhanced_transaction->get_seq_no(), std::nullopt, std::nullopt, std::nullopt,
+                                        opt_meter_value, std::nullopt, this->is_offline(), std::nullopt);
         };
         send_evse_message(send_transaction);
     } break;
