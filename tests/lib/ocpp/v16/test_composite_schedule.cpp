@@ -131,10 +131,6 @@ protected:
         to_json(ecs_json, ecs);
 
         EVLOG_info << "EnhancedChargingSchedule> " << ecs_json.dump(4);
-
-        // for (auto& period : ecs.chargingSchedulePeriod) {
-        //     log_duration(period.startPeriod);
-        // }
     }
 
     void log_me(EnhancedChargingSchedule& ecs, const DateTime start_time) {
