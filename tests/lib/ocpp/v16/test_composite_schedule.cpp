@@ -141,12 +141,22 @@ protected:
         log_me(ecs);
         EVLOG_info << "Start Time> " << start_time.to_rfc3339();
 
-        int32_t i = 1;
+        int32_t i = 0;
         for (auto& period : ecs.chargingSchedulePeriod) {
-            EVLOG_info << "   period #" << i << " starts " << get_log_duration_string(period.startPeriod) << "in";
             i++;
+            int32_t numberPhases = 0;
+            if (period.numberPhases.has_value()) {
+                numberPhases = period.numberPhases.value();
+            }
+            EVLOG_info << "   period #" << i << " {limit: " << period.limit << " numberPhases:" << numberPhases
+                       << " stackLevel:" << period.stackLevel << "} starts "
+                       << get_log_duration_string(period.startPeriod) << "in";
         }
-        EVLOG_info << "   period #" << i << " ends " << get_log_duration_string(ecs.duration);
+        if (ecs.duration.has_value()) {
+            EVLOG_info << "   period #" << i << " ends after " << get_log_duration_string(ecs.duration.value());
+        } else {
+            EVLOG_info << "   period #" << i << " ends in 0 Seconds";
+        }
     }
 
     /// \brief Returns a vector of ChargingProfiles to be used as a baseline for testing core functionality
@@ -199,7 +209,7 @@ TEST_F(CompositeScheduleTestFixture, CalculateEnhancedCompositeSchedule_Validate
 }
 
 TEST_F(CompositeScheduleTestFixture, CalculateEnhancedCompositeSchedule_Baseline__PossibleDefect) {
-    GTEST_SKIP();
+    // GTEST_SKIP();
     auto handler = createSmartChargingHandler(1);
 
     std::vector<ChargingProfile> profiles = getBaselineProfileVector();
@@ -214,7 +224,7 @@ TEST_F(CompositeScheduleTestFixture, CalculateEnhancedCompositeSchedule_Baseline
     auto composite_schedule = handler->calculate_enhanced_composite_schedule(
         profiles, my_date_start_range, my_date_end_range, 1, profiles.at(0).chargingSchedule.chargingRateUnit);
 
-    log_me(composite_schedule);
+    log_me(composite_schedule, my_date_start_range);
 }
 
 TEST_F(CompositeScheduleTestFixture, CalculateEnhancedCompositeSchedule_TxProfile) {
