@@ -69,36 +69,6 @@ int get_power_limit(const int limit, const int nr_phases, const ChargingRateUnit
     }
 }
 
-ocpp::DateTime get_period_end_time(const int period_index, const ocpp::DateTime& period_start_time,
-                                   const ChargingSchedule& schedule,
-                                   const std::vector<ChargingSchedulePeriod>& periods) {
-
-    std::optional<ocpp::DateTime> period_end_time;
-
-    int period_diff_in_seconds;
-    if ((size_t)period_index + 1 < periods.size()) {
-        int duration;
-        if (schedule.duration) {
-            duration = schedule.duration.value();
-        } else {
-            duration = std::numeric_limits<int>::max();
-        }
-
-        if (periods.at(period_index + 1).startPeriod < duration) {
-            period_diff_in_seconds = periods.at(period_index + 1).startPeriod - periods.at(period_index).startPeriod;
-        } else {
-            period_diff_in_seconds = duration - periods.at(period_index).startPeriod;
-        }
-        const auto dt = ocpp::DateTime(period_start_time.to_time_point() + seconds(period_diff_in_seconds));
-        return dt;
-    } else if (schedule.duration) {
-        period_diff_in_seconds = schedule.duration.value() - periods.at(period_index).startPeriod;
-        return ocpp::DateTime(period_start_time.to_time_point() + seconds(period_diff_in_seconds));
-    } else {
-        return ocpp::DateTime(date::utc_clock::now() + hours(std::numeric_limits<int>::max()));
-    }
-}
-
 void log_purpose_and_stack_limits(const std::map<ChargingProfilePurposeType, LimitStackLevelPair>& map) {
     EVLOG_info << "Purpose and stack level limits>";
     for (const auto& [purpose, limit_stack_level_pair] : map) {
@@ -674,6 +644,7 @@ std::optional<ocpp::DateTime> SmartChargingHandler::get_profile_start_time(const
             EVLOG_warning << "Absolute profile with no startSchedule, this should not be possible";
         }
     } else if (profile.chargingProfileKind == ChargingProfileKindType::Relative) {
+        EVLOG_info << "get_profile_start_time> Relative> " << schedule.startSchedule.value().to_rfc3339();
         if (this->connectors.at(connector_id)->transaction != nullptr) {
             period_start_time.emplace(ocpp::DateTime(floor<seconds>(
                 this->connectors.at(connector_id)->transaction->get_start_energy_wh()->timestamp.to_time_point())));
@@ -697,20 +668,71 @@ std::optional<ocpp::DateTime> SmartChargingHandler::get_profile_start_time(const
     return period_start_time;
 }
 
+ocpp::DateTime get_period_end_time(const int period_index, const ocpp::DateTime& period_start_time,
+                                   const ChargingSchedule& schedule,
+                                   const std::vector<ChargingSchedulePeriod>& periods) {
+
+    std::optional<ocpp::DateTime> period_end_time;
+
+    int period_diff_in_seconds;
+    if ((size_t)period_index + 1 < periods.size()) {
+        int duration;
+        if (schedule.duration) {
+            duration = schedule.duration.value();
+        } else {
+            duration = std::numeric_limits<int>::max();
+        }
+
+        if (periods.at(period_index + 1).startPeriod < duration) {
+            period_diff_in_seconds = periods.at(period_index + 1).startPeriod - periods.at(period_index).startPeriod;
+        } else {
+            period_diff_in_seconds = duration - periods.at(period_index).startPeriod;
+        }
+        const auto dt = ocpp::DateTime(period_start_time.to_time_point() + seconds(period_diff_in_seconds));
+        return dt;
+    } else if (schedule.duration) {
+        period_diff_in_seconds = schedule.duration.value() - periods.at(period_index).startPeriod;
+        return ocpp::DateTime(period_start_time.to_time_point() + seconds(period_diff_in_seconds));
+    } else {
+        return ocpp::DateTime(date::utc_clock::now() + hours(std::numeric_limits<int>::max()));
+    }
+}
+
+// Step 1 - lowest_next_time is set to maximum tine in the future
+// Step 2 - Iterate through the profiles
+// Step 3 - Get first starting schedule (only one currently supported)
+// Step 4 - Get period_start_time and continue if available
+// Step 5 - Iterate through the ChargingSchedulePeriods
+// Step 6 - Get Period end time
+// Step 7 - Continue if not within final time window
 ocpp::DateTime SmartChargingHandler::get_next_temp_time(const ocpp::DateTime temp_time,
                                                         const std::vector<ChargingProfile>& valid_profiles,
                                                         const int connector_id) {
+    // Step 1 - lowest_next_time is set to maximum tine in the future
     auto lowest_next_time = ocpp::DateTime(date::utc_clock::now() + hours(std::numeric_limits<int>::max()));
+
+    // Step 2 - Iterate through the profiles
     for (const auto& profile : valid_profiles) {
+
+        // Step 3 - Get first starting schedule (only one currently supported)
         const auto schedule = profile.chargingSchedule;
         const auto periods = schedule.chargingSchedulePeriod;
+
+        // Step 4 - Get period_start_time and continue if available
         const auto period_start_time_opt = this->get_profile_start_time(profile, temp_time, connector_id);
         if (period_start_time_opt) {
             auto period_start_time = period_start_time_opt.value();
+
+            // Step 5 - Iterate through the ChargingSchedulePeriods
             for (size_t i = 0; i < periods.size(); i++) {
+
+                // Step 6 - Get Period end time
                 auto period_end_time = get_period_end_time(i, period_start_time, schedule, periods);
-                if (temp_time >= period_start_time && temp_time < period_end_time &&
-                    period_end_time < lowest_next_time) {
+
+                // Step 7 - Continue if not within final time window
+                // if (temp_time >= period_start_time && temp_time < period_end_time &&
+                //     period_end_time < lowest_next_time) {
+                if (temp_time < period_end_time && period_end_time < lowest_next_time) {
                     lowest_next_time = period_end_time;
                 }
                 period_start_time = period_end_time;

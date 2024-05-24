@@ -224,4 +224,13 @@ std::vector<ChargingProfile> SmartChargingHandler::get_station_wide_tx_default_p
     return station_wide_tx_default_profiles;
 }
 
+CompositeSchedule calculate_composite_schedule(std::vector<ChargingProfile> valid_profiles,
+                                               const ocpp::DateTime& start_time, const ocpp::DateTime& end_time,
+                                               const int32_t evse_id,
+                                               std::optional<ChargingRateUnitEnum> charging_rate_unit) {
+    CompositeSchedule composite_schedule;
+
+    return composite_schedule;
+}
+
 } // namespace ocpp::v201

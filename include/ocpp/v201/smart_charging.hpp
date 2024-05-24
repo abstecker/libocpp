@@ -83,6 +83,14 @@ public:
     ///
     void add_profile(int32_t evse_id, ChargingProfile& profile);
 
+    ///
+    /// \brief Calculates the composite schedule for the given \p valid_profiles and the given \p connector_id
+    ///
+    CompositeSchedule calculate_composite_schedule(std::vector<ChargingProfile> valid_profiles,
+                                                   const ocpp::DateTime& start_time, const ocpp::DateTime& end_time,
+                                                   const int32_t evse_id,
+                                                   std::optional<ChargingRateUnitEnum> charging_rate_unit);
+
 private:
     std::vector<ChargingProfile> get_evse_specific_tx_default_profiles() const;
     std::vector<ChargingProfile> get_station_wide_tx_default_profiles() const;
